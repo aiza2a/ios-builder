@@ -24,6 +24,7 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           ref: ${{ inputs.source_ref || 'main' }}
           path: source
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install build generator
@@ -32,6 +33,55 @@ jobs:
       - name: Generate project
         working-directory: source
         run: xcodegen generate > "$RUNNER_TEMP/project.log" 2>&1
+
+      - name: Prepare release metadata
+        working-directory: source
+        env:
+          APP_NAME: ${{ secrets.SOURCE_SCHEME }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          SOURCE_REF: ${{ inputs.source_ref || 'main' }}
+        run: |
+          version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([^" ]+)"?.*$/\1/p' project.yml | head -n 1)"
+          test -n "$version"
+          source_commit="$(git rev-parse HEAD)"
+          release_tag="v${version}-${BUILD_NUMBER}"
+          ipa_name="${APP_NAME}-${release_tag}.ipa"
+
+          {
+            echo "MARKETING_VERSION=$version"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "RELEASE_TAG=$release_tag"
+            echo "IPA_NAME=$ipa_name"
+            echo "SOURCE_COMMIT=$source_commit"
+            echo "SOURCE_REF=$SOURCE_REF"
+          } >> "$GITHUB_ENV"
+
+          if [ -s RELEASE_NOTES_ZH.md ]; then
+            cp RELEASE_NOTES_ZH.md "$RUNNER_TEMP/release-notes.md"
+          else
+            {
+              echo "## 本次修改"
+              echo "- 未提供 RELEASE_NOTES_ZH.md，以下内容根据源码提交自动整理。"
+              echo
+              echo "### 提交摘要"
+              last_tag="$(git tag --list 'v*-*' --sort=-version:refname | head -n 1)"
+              if [ -z "$last_tag" ]; then
+                last_tag="$(git tag --list 'build-*' --sort=-version:refname | head -n 1)"
+              fi
+              if [ -n "$last_tag" ] && git rev-parse "$last_tag" >/dev/null 2>&1; then
+                git log --no-merges --format='- %s (%h)' "$last_tag..HEAD"
+                echo
+                echo "### 变更文件"
+                git diff --stat "$last_tag..HEAD"
+              else
+                git log --no-merges -n 20 --format='- %s (%h)'
+                echo
+                echo "### 最近提交变更文件"
+                git show --stat --oneline --summary HEAD
+              fi
+            } > "$RUNNER_TEMP/release-notes.md"
+          fi
+          echo "metadata=verified"
 
       - name: Archive
         working-directory: source
@@ -62,23 +112,42 @@ jobs:
           app_path="$(find build/App.xcarchive/Products/Applications -maxdepth 1 -type d -name '*.app' | head -n 1)"
           test -n "$app_path"
           cp -R "$app_path" build/Payload/
-          (cd build && zip -qr App-unsigned.ipa Payload)
-          test -s build/App-unsigned.ipa
+          (cd build && zip -qr "$IPA_NAME" Payload)
+          test -s "build/$IPA_NAME"
           echo "package=verified"
 
       - name: Publish private artifact
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
           DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
-          SOURCE_REF: ${{ inputs.source_ref || 'main' }}
+          APP_NAME: ${{ secrets.SOURCE_SCHEME }}
         run: |
-          tag="build-${GITHUB_RUN_NUMBER}"
-          if ! gh release create "$tag" \
-              "$GITHUB_WORKSPACE/source/build/App-unsigned.ipa" \
+          {
+            cat "$RUNNER_TEMP/release-notes.md"
+            echo
+            echo "## 构建信息"
+            echo "- 应用版本：$MARKETING_VERSION"
+            echo "- 构建编号：$BUILD_NUMBER"
+            echo "- 源码提交：$SOURCE_COMMIT"
+            echo "- 源码版本：$SOURCE_REF"
+            echo
+            echo "## 验证结果"
+            echo "- 私有源码读取：通过"
+            echo "- Xcode 工程生成：通过"
+            echo "- Archive 编译：通过"
+            echo "- IPA 打包：通过"
+            echo "- 私有 Release 发布：通过"
+            echo
+            echo "## 产物"
+            echo "- $IPA_NAME"
+          } > "$RUNNER_TEMP/release-body.md"
+
+          if ! gh release create "$RELEASE_TAG" \
+              "$GITHUB_WORKSPACE/source/build/$IPA_NAME" \
               --repo "$DESTINATION_REPOSITORY" \
               --target "$SOURCE_REF" \
-              --title "Build ${GITHUB_RUN_NUMBER}" \
-              --notes "Automated unsigned build." \
+              --title "${APP_NAME} ${RELEASE_TAG}" \
+              --notes-file "$RUNNER_TEMP/release-body.md" \
               > "$RUNNER_TEMP/publish.log" 2>&1; then
             echo "private_artifact=failed"
             exit 1
