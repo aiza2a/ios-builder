@@ -1,10 +1,10 @@
-name: Cross-repository iOS build test
+name: Build
 
 on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Source repository branch or commit
+        description: Source revision
         required: false
         default: main
         type: string
@@ -17,39 +17,43 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: Checkout source repository
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
-          repository: aiza2a/Neiro
+          repository: ${{ secrets.SOURCE_REPOSITORY }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           ref: ${{ inputs.source_ref || 'main' }}
           path: source
           persist-credentials: false
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install build generator
+        run: brew install xcodegen > "$RUNNER_TEMP/generator.log" 2>&1
 
-      - name: Generate Xcode project
+      - name: Generate project
         working-directory: source
-        run: xcodegen generate
+        run: xcodegen generate > "$RUNNER_TEMP/project.log" 2>&1
 
-      - name: Archive unsigned IPA payload
+      - name: Archive
         working-directory: source
         env:
           BUILD_NUMBER: ${{ github.run_number }}
+          SOURCE_PROJECT: ${{ secrets.SOURCE_PROJECT }}
+          SOURCE_SCHEME: ${{ secrets.SOURCE_SCHEME }}
         run: |
           xcodebuild archive \
-            -project Neiro.xcodeproj \
-            -scheme Neiro \
+            -project "$SOURCE_PROJECT" \
+            -scheme "$SOURCE_SCHEME" \
             -configuration Release \
             -destination generic/platform=iOS \
-            -archivePath build/Neiro.xcarchive \
-            CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
+            -archivePath build/App.xcarchive \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_ENTITLEMENTS="" \
-            EXPANDED_CODE_SIGN_IDENTITY=""
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            > "$RUNNER_TEMP/archive.log" 2>&1
 
       - name: Verify archive
         working-directory: source
-        run: test -d build/Neiro.xcarchive
+        run: test -d build/App.xcarchive && echo "archive=verified"
