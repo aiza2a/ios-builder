@@ -54,6 +54,33 @@ jobs:
             EXPANDED_CODE_SIGN_IDENTITY="" \
             > "$RUNNER_TEMP/archive.log" 2>&1
 
-      - name: Verify archive
+      - name: Package IPA
         working-directory: source
-        run: test -d build/App.xcarchive && echo "archive=verified"
+        run: |
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          app_path="$(find build/App.xcarchive/Products/Applications -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          test -n "$app_path"
+          cp -R "$app_path" build/Payload/
+          (cd build && zip -qr App-unsigned.ipa Payload)
+          test -s build/App-unsigned.ipa
+          echo "package=verified"
+
+      - name: Publish private artifact
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
+          DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
+          SOURCE_REF: ${{ inputs.source_ref || 'main' }}
+        run: |
+          tag="build-${GITHUB_RUN_NUMBER}"
+          if ! gh release create "$tag" \
+              "$GITHUB_WORKSPACE/source/build/App-unsigned.ipa" \
+              --repo "$DESTINATION_REPOSITORY" \
+              --target "$SOURCE_REF" \
+              --title "Build ${GITHUB_RUN_NUMBER}" \
+              --notes "Automated unsigned build." \
+              > "$RUNNER_TEMP/publish.log" 2>&1; then
+            echo "private_artifact=failed"
+            exit 1
+          fi
+          echo "private_artifact=published"
