@@ -104,6 +104,13 @@ jobs:
             EXPANDED_CODE_SIGN_IDENTITY="" \
             > "$RUNNER_TEMP/archive.log" 2>&1
 
+      - name: Show archive diagnostics on failure
+        if: failure()
+        working-directory: source
+        run: |
+          echo "archive=failed"
+          grep -E "error:|fatal error:|BUILD FAILED|SwiftCompile|CompileSwift" "$RUNNER_TEMP/archive.log" | tail -200 || true
+
       - name: Package IPA
         working-directory: source
         run: |
