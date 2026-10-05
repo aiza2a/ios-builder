@@ -133,7 +133,7 @@ jobs:
             > "$RUNNER_TEMP/archive.log" 2>&1
 
       - name: Show archive diagnostics on failure
-        if: steps.archive.outcome == 'failure'
+        if: failure() && steps.archive.outcome == 'failure'
         working-directory: source
         run: |
           echo "archive=failed"
