@@ -15,6 +15,8 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
     steps:
       - name: Checkout source
@@ -82,6 +84,31 @@ jobs:
             } > "$RUNNER_TEMP/release-notes.md"
           fi
           echo "metadata=verified"
+
+      - name: Verify Xcode 26 toolchain
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+          test -d "$DEVELOPER_DIR"
+
+      - name: UI and sorting regressions
+        working-directory: source
+        run: bash tools/test_ui_regressions.sh > "$RUNNER_TEMP/ui-tests.log" 2>&1
+
+      - name: Show regression diagnostics
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/ui-tests.log" ]; then
+            grep -E "error:|failed|passed|Executed|TEST SUCCEEDED|TEST FAILED" "$RUNNER_TEMP/ui-tests.log" | tail -120 || true
+          fi
+
+      - name: Upload UI regression results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: UI-Regression-Results
+          path: source/build/UIRegression-*.xcresult
+          if-no-files-found: ignore
 
       - name: Archive
         working-directory: source
