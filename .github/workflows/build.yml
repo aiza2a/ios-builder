@@ -111,6 +111,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Archive
+        id: archive
         working-directory: source
         env:
           BUILD_NUMBER: ${{ github.run_number }}
@@ -132,7 +133,7 @@ jobs:
             > "$RUNNER_TEMP/archive.log" 2>&1
 
       - name: Show archive diagnostics on failure
-        if: failure()
+        if: steps.archive.outcome == 'failure'
         working-directory: source
         run: |
           echo "archive=failed"
