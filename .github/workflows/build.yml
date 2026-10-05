@@ -99,7 +99,8 @@ jobs:
         if: always()
         run: |
           if [ -f "$RUNNER_TEMP/ui-tests.log" ]; then
-            grep -E "error:|failed|passed|Executed|TEST SUCCEEDED|TEST FAILED" "$RUNNER_TEMP/ui-tests.log" | tail -120 || true
+            grep -E "error:|failed|TEST FAILED" "$RUNNER_TEMP/ui-tests.log" || true
+            grep -E "Executed|TEST SUCCEEDED" "$RUNNER_TEMP/ui-tests.log" | tail -30 || true
           fi
 
       - name: Upload UI regression results
