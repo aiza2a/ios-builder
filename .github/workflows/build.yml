@@ -13,6 +13,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_interaction_tests:
+        description: Include touch interaction tests
+        required: false
+        default: false
+        type: boolean
+      build_artifact:
+        description: Compile, package and publish an IPA
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -42,6 +52,7 @@ jobs:
         run: xcodegen generate > "$RUNNER_TEMP/project.log" 2>&1
 
       - name: Prepare release metadata
+        if: ${{ inputs.build_artifact }}
         working-directory: source
         env:
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
@@ -97,12 +108,14 @@ jobs:
           test -d "$DEVELOPER_DIR"
 
       - name: UI and sorting regressions
-        if: ${{ inputs.run_tests }}
+        if: ${{ inputs.run_tests || inputs.run_interaction_tests }}
         working-directory: source
+        env:
+          RUN_INTERACTION_TESTS: ${{ inputs.run_interaction_tests && '1' || '0' }}
         run: bash tools/test_ui_regressions.sh > "$RUNNER_TEMP/ui-tests.log" 2>&1
 
       - name: Show regression diagnostics
-        if: ${{ always() && inputs.run_tests }}
+        if: ${{ always() && (inputs.run_tests || inputs.run_interaction_tests) }}
         run: |
           if [ -f "$RUNNER_TEMP/ui-tests.log" ]; then
             grep -E "error:|failed|TEST FAILED" "$RUNNER_TEMP/ui-tests.log" || true
@@ -110,14 +123,17 @@ jobs:
           fi
 
       - name: Upload UI regression results
-        if: ${{ always() && inputs.run_tests }}
+        if: ${{ always() && (inputs.run_tests || inputs.run_interaction_tests) }}
         uses: actions/upload-artifact@v4
         with:
           name: UI-Regression-Results
-          path: source/build/UIRegression-*.xcresult
+          path: |
+            source/build/UIRegression-*.xcresult
+            ${{ runner.temp }}/ui-tests.log
           if-no-files-found: ignore
 
       - name: Archive
+        if: ${{ inputs.build_artifact }}
         id: archive
         working-directory: source
         env:
@@ -147,6 +163,7 @@ jobs:
           grep -E "error:|fatal error:|BUILD FAILED|SwiftCompile|CompileSwift" "$RUNNER_TEMP/archive.log" | tail -200 || true
 
       - name: Package IPA
+        if: ${{ inputs.build_artifact }}
         working-directory: source
         run: |
           rm -rf build/Payload
@@ -159,6 +176,7 @@ jobs:
           echo "package=verified"
 
       - name: Publish private artifact
+        if: ${{ inputs.build_artifact }}
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
           DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
