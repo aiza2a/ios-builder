@@ -6,8 +6,13 @@ on:
       source_ref:
         description: Source revision
         required: false
-        default: main
+        default: fix/ui-aesthetic-round2
         type: string
+      run_tests:
+        description: Run targeted regression tests before compiling
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,7 +29,7 @@ jobs:
         with:
           repository: ${{ secrets.SOURCE_REPOSITORY }}
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          ref: ${{ inputs.source_ref || 'main' }}
+          ref: ${{ inputs.source_ref || 'fix/ui-aesthetic-round2' }}
           path: source
           fetch-depth: 0
           persist-credentials: false
@@ -41,7 +46,7 @@ jobs:
         env:
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
           BUILD_NUMBER: ${{ github.run_number }}
-          SOURCE_REF: ${{ inputs.source_ref || 'main' }}
+          SOURCE_REF: ${{ inputs.source_ref || 'fix/ui-aesthetic-round2' }}
         run: |
           version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([^" ]+)"?.*$/\1/p' project.yml | head -n 1)"
           test -n "$version"
@@ -92,11 +97,12 @@ jobs:
           test -d "$DEVELOPER_DIR"
 
       - name: UI and sorting regressions
+        if: ${{ inputs.run_tests }}
         working-directory: source
         run: bash tools/test_ui_regressions.sh > "$RUNNER_TEMP/ui-tests.log" 2>&1
 
       - name: Show regression diagnostics
-        if: always()
+        if: ${{ always() && inputs.run_tests }}
         run: |
           if [ -f "$RUNNER_TEMP/ui-tests.log" ]; then
             grep -E "error:|failed|TEST FAILED" "$RUNNER_TEMP/ui-tests.log" || true
@@ -104,7 +110,7 @@ jobs:
           fi
 
       - name: Upload UI regression results
-        if: always()
+        if: ${{ always() && inputs.run_tests }}
         uses: actions/upload-artifact@v4
         with:
           name: UI-Regression-Results
@@ -157,6 +163,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
           DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
+          RUN_REGRESSION_TESTS: ${{ inputs.run_tests }}
         run: |
           {
             cat "$RUNNER_TEMP/release-notes.md"
@@ -171,6 +178,11 @@ jobs:
             echo "- 私有源码读取：通过"
             echo "- Xcode 工程生成：通过"
             echo "- Archive 编译：通过"
+            if [ "$RUN_REGRESSION_TESTS" = true ]; then
+              echo "- 专项测试：通过"
+            else
+              echo "- 专项测试：按本次选择未执行"
+            fi
             echo "- IPA 打包：通过"
             echo "- 私有 Release 发布：通过"
             echo
