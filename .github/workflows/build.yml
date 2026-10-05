@@ -23,6 +23,11 @@ on:
         required: false
         default: true
         type: boolean
+      run_work_menu_smoke:
+        description: Verify work-card taps and native context menus
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -132,6 +137,28 @@ jobs:
             ${{ runner.temp }}/ui-tests.log
           if-no-files-found: ignore
 
+      - name: Work menu touch smoke
+        if: ${{ inputs.run_work_menu_smoke }}
+        working-directory: source
+        run: bash tools/test_work_menu_smoke.sh > "$RUNNER_TEMP/work-menu-smoke.log" 2>&1
+
+      - name: Show work menu diagnostics
+        if: ${{ always() && inputs.run_work_menu_smoke }}
+        run: |
+          if [ -f "$RUNNER_TEMP/work-menu-smoke.log" ]; then
+            grep -E "error:|failed|TEST FAILED|Executed|TEST SUCCEEDED" "$RUNNER_TEMP/work-menu-smoke.log" | tail -80 || true
+          fi
+
+      - name: Upload work menu results
+        if: ${{ always() && inputs.run_work_menu_smoke }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Work-Menu-Smoke
+          path: |
+            source/build/WorkMenuSmoke*.xcresult
+            ${{ runner.temp }}/work-menu-smoke.log
+          if-no-files-found: warn
+
       - name: Archive
         if: ${{ inputs.build_artifact }}
         id: archive
@@ -182,6 +209,7 @@ jobs:
           DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
           RUN_REGRESSION_TESTS: ${{ inputs.run_tests }}
+          RUN_WORK_MENU_SMOKE: ${{ inputs.run_work_menu_smoke }}
         run: |
           {
             cat "$RUNNER_TEMP/release-notes.md"
@@ -202,6 +230,9 @@ jobs:
               echo "- 专项测试：按本次选择未执行"
             fi
             echo "- IPA 打包：通过"
+            if [ "$RUN_WORK_MENU_SMOKE" = true ]; then
+              echo "- 作品点击与原生长按触摸检查：通过"
+            fi
             echo "- 私有 Release 发布：通过"
             echo
             echo "## 产物"
