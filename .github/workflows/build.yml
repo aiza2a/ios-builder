@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      work_menu_test_filter:
+        description: XCTest identifier for the requested touch checks
+        required: false
+        default: NeiroInteractionUITests/WorkMenuTouchTests
+        type: string
 
 permissions:
   contents: read
@@ -140,7 +145,9 @@ jobs:
       - name: Work menu touch smoke
         if: ${{ inputs.run_work_menu_smoke }}
         working-directory: source
-        run: bash tools/test_work_menu_smoke.sh > "$RUNNER_TEMP/work-menu-smoke.log" 2>&1
+        env:
+          WORK_MENU_TEST_FILTER: ${{ inputs.work_menu_test_filter }}
+        run: bash tools/test_work_menu_smoke.sh "$WORK_MENU_TEST_FILTER" > "$RUNNER_TEMP/work-menu-smoke.log" 2>&1
 
       - name: Show work menu diagnostics
         if: ${{ always() && inputs.run_work_menu_smoke }}
