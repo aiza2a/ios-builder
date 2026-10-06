@@ -18,6 +18,14 @@ on:
         required: false
         default: false
         type: boolean
+      regression_scope:
+        description: Select the requested regression test group
+        required: false
+        default: ui
+        type: choice
+        options:
+          - ui
+          - listening-player
       build_artifact:
         description: Compile, package and publish an IPA
         required: false
@@ -122,6 +130,7 @@ jobs:
         working-directory: source
         env:
           RUN_INTERACTION_TESTS: ${{ inputs.run_interaction_tests && '1' || '0' }}
+          REGRESSION_SCOPE: ${{ inputs.regression_scope || 'ui' }}
         run: bash tools/test_ui_regressions.sh > "$RUNNER_TEMP/ui-tests.log" 2>&1
 
       - name: Show regression diagnostics
