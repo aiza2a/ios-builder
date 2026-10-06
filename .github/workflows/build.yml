@@ -48,10 +48,20 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    # All adopting branches share one release lane. Test-only runs remain independent.
+    concurrency:
+      group: ${{ inputs.build_artifact && 'successful-ipa-release' || format('tests-{0}', github.run_id) }}
+      cancel-in-progress: false
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
     steps:
+      - name: Checkout builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+          persist-credentials: false
+
       - name: Checkout source
         uses: actions/checkout@v4
         with:
@@ -74,11 +84,14 @@ jobs:
         working-directory: source
         env:
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
-          BUILD_NUMBER: ${{ github.run_number }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
+          DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
           SOURCE_REF: ${{ inputs.source_ref || 'fix/ui-aesthetic-round2' }}
         run: |
           version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([^" ]+)"?.*$/\1/p' project.yml | head -n 1)"
           test -n "$version"
+          export MARKETING_VERSION="$version"
+          BUILD_NUMBER="$(python3 "$GITHUB_WORKSPACE/builder/tools/release_number.py" resolve)"
           source_commit="$(git rev-parse HEAD)"
           release_tag="v${version}-${BUILD_NUMBER}"
           ipa_name="${APP_NAME}-${release_tag}.ipa"
@@ -180,7 +193,6 @@ jobs:
         id: archive
         working-directory: source
         env:
-          BUILD_NUMBER: ${{ github.run_number }}
           SOURCE_PROJECT: ${{ secrets.SOURCE_PROJECT }}
           SOURCE_SCHEME: ${{ secrets.SOURCE_SCHEME }}
         run: |
@@ -255,14 +267,6 @@ jobs:
             echo "- $IPA_NAME"
           } > "$RUNNER_TEMP/release-body.md"
 
-          if ! gh release create "$RELEASE_TAG" \
-              "$GITHUB_WORKSPACE/source/build/$IPA_NAME" \
-              --repo "$DESTINATION_REPOSITORY" \
-              --target "$SOURCE_REF" \
-              --title "${APP_NAME} ${RELEASE_TAG}" \
-              --notes-file "$RUNNER_TEMP/release-body.md" \
-              > "$RUNNER_TEMP/publish.log" 2>&1; then
-            echo "private_artifact=failed"
-            exit 1
-          fi
-          echo "private_artifact=published"
+          export IPA_PATH="$GITHUB_WORKSPACE/source/build/$IPA_NAME"
+          export NOTES_PATH="$RUNNER_TEMP/release-body.md"
+          python3 "$GITHUB_WORKSPACE/builder/tools/release_number.py" publish

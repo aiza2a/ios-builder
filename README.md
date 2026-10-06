@@ -42,26 +42,34 @@ xcodebuild archive
 
 1. 打开本仓库的 **Actions → Build**。
 2. 点击 **Run workflow**。
-3. 在 `source_ref` 中填写源仓库的分支、Tag 或 commit SHA；留空时使用 `main`。
+3. 选择构建器分支：`main` 或 `fix/ui-aesthetic-round2`。在 `source_ref` 中填写源仓库的分支、Tag 或 commit SHA；默认值与所选构建器分支对应。
 4. 等待 `Archive`、`Package IPA` 和 `Publish private artifact` 全部成功。
 
 ## 产物命名与位置
 
-版本号从源仓库 `project.yml` 的 `MARKETING_VERSION` 自动读取，构建编号使用 GitHub Actions 的 `run_number`。
+版本号从源仓库 `project.yml` 的 `MARKETING_VERSION` 自动读取。构建编号为源仓库同版本、已正式发布且带有完整 IPA 的 Release 最大编号加 1；新版本从 1 开始。编译失败、上传失败及纯测试不占号。
 
 ```text
-Release tag: v<MARKETING_VERSION>-<run_number>
-IPA:         <SOURCE_SCHEME>-v<MARKETING_VERSION>-<run_number>.ipa
+Release tag: v<MARKETING_VERSION>-<BUILD_NUMBER>
+IPA:         <SOURCE_SCHEME>-v<MARKETING_VERSION>-<BUILD_NUMBER>.ipa
 ```
 
 例如：
 
 ```text
-v1.2.3-42
-App-v1.2.3-42.ipa
+v1.2.3-1 → v1.2.3-2 → v1.2.4-1
+App-v1.2.4-1.ipa
 ```
 
 构建完成后，进入私有源仓库的 **Releases** 查看和下载 IPA。公开构建仓库不会生成公开 Artifact。
+
+安装包内部的 `CURRENT_PROJECT_VERSION`、文件名与 Release 使用同一个编号。旧版本保留已有编号和间隙（如已有最大编号 57，下次为 58），不重写历史。请勿删除成功发布的历史 Release/IPA，否则将失去相应计数依据。
+
+两个构建器分支共用发布互斥组，避免同时领取同一个编号；不会取消正在构建的任务。GitHub 并发组仅保留一个等待任务，连续提交多个构建时，较新的等待任务可能替换旧的等待任务。纯测试独立运行。
+
+发布先创建本次运行专属草稿，上传并核对 IPA 后才正式发布为版本编号标签。可捕获的失败清理本次草稿；强制取消可能留下 `pending-build-*` 草稿，不参与计数。不会删除旧标签或覆盖已有正式发布。正式发布绑定实际编译的 commit SHA，不追随构建期间移动的源码分支。
+
+如存在同号标签但没有完整的正式发布，流程显式报错，请人工检查；不会靠跳号或覆盖掩盖异常。同一次工作流重新运行且成功发布会取得下一个编号。GitHub Actions 自带的运行流水号仍由 GitHub 管理，只有应用构建编号采用这里的规则。
 
 当前工作流使用关闭代码签名的 Archive 参数，因此产物是**未签名 IPA**：
 
