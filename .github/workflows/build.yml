@@ -19,7 +19,7 @@ on:
         default: true
         type: boolean
       test_scope:
-        description: Full suite, subtitle playback, or focused subtitle store regressions
+        description: Full suite, subtitle playback, or focused subtitle store and browse regressions
         required: false
         default: full
         type: choice
@@ -27,6 +27,7 @@ on:
           - full
           - subtitle
           - subtitle_store
+          - subtitle_browse
       run_picker_tests:
         description: Touch the real iOS Files picker with synthetic local archives
         required: false
@@ -168,7 +169,7 @@ jobs:
           brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
       - name: Native archive regression
         id: native
-        if: ${{ inputs.test_scope != 'subtitle_store' }}
+        if: ${{ inputs.test_scope == 'full' || inputs.test_scope == 'subtitle' }}
         working-directory: source
         run: bash tools/test_archive_native.sh > "$RUNNER_TEMP/native-tests.log" 2>&1
       - name: XCTest
@@ -182,12 +183,19 @@ jobs:
           case "$TEST_SCOPE" in
             full) ;;
             subtitle)
-              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests ArtworkPaletteTests; do
+              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests ArtworkPaletteTests ListeningStatisticsRuntimeFixTests; do
                 filters+=("-only-testing:NeiroTests/$test_class")
               done
               ;;
             subtitle_store)
               filters+=("-only-testing:NeiroTests/SubtitleLibraryStoreTests")
+              ;;
+            subtitle_browse)
+              for test_class in SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleMatchingTests LyricsStoreTests; do
+                filters+=("-only-testing:NeiroTests/$test_class")
+              done
+              filters+=("-only-testing:NeiroTests/ListeningStatisticsRuntimeFixTests/testRowInteractionDecisionPureFunction")
+              filters+=("-only-testing:NeiroTests/ListeningStatisticsRuntimeFixTests/testDeleteHitDecisionPureFunction")
               ;;
             *) echo "Unknown test scope" >&2; exit 2 ;;
           esac
@@ -264,6 +272,30 @@ jobs:
           git merge-base --is-ancestor HEAD origin/feature/subtitle-archive-import
           xcodebuild -version
           brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
+      - name: Select latest available iOS simulator
+        run: |
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/subtitle-ui-devices.json"
+          python3 - "$RUNNER_TEMP/subtitle-ui-devices.json" "$GITHUB_ENV" <<'PY'
+          import json
+          import re
+          import sys
+
+          candidates = []
+          for runtime, devices in json.load(open(sys.argv[1], encoding="utf-8"))["devices"].items():
+              match = re.search(r"(?:^|\.)iOS-(\d+(?:-\d+)*)", runtime)
+              if match is None:
+                  continue
+              version = tuple(int(part) for part in match[1].split("-"))
+              for device in devices:
+                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                      candidates.append((version, device.get("state") == "Booted", device))
+          if not candidates:
+              raise SystemExit("No available iPhone simulator was found.")
+          version, _, device = max(candidates, key=lambda item: (item[0], item[1]))
+          with open(sys.argv[2], "a", encoding="utf-8") as environment:
+              environment.write(f"TEST_DESTINATION=platform=iOS Simulator,id={device['udid']}\n")
+          print(f"Subtitle UI simulator: {device['name']}, iOS {'.'.join(map(str, version))}, {device['udid']}")
+          PY
       - name: Subtitle UI regressions
         working-directory: source
         run: |
