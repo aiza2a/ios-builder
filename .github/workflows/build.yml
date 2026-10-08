@@ -18,6 +18,14 @@ on:
         required: false
         default: true
         type: boolean
+      test_scope:
+        description: Full suite or subtitle and playback regressions
+        required: false
+        default: full
+        type: choice
+        options:
+          - full
+          - subtitle
 
 permissions:
   contents: read
@@ -155,7 +163,20 @@ jobs:
         id: xctest
         if: ${{ !cancelled() }}
         working-directory: source
-        run: bash tools/test_ios.sh > "$RUNNER_TEMP/xctest.log" 2>&1
+        env:
+          TEST_SCOPE: ${{ inputs.test_scope }}
+        run: |
+          filters=()
+          case "$TEST_SCOPE" in
+            full) ;;
+            subtitle)
+              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests; do
+                filters+=("-only-testing:NeiroTests/$test_class")
+              done
+              ;;
+            *) echo "Unknown test scope" >&2; exit 2 ;;
+          esac
+          bash tools/test_ios.sh "${filters[@]}" > "$RUNNER_TEMP/xctest.log" 2>&1
       - name: Test diagnostics
         if: always()
         run: |
