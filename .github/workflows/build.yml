@@ -31,6 +31,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_subtitle_ui_tests:
+        description: Exercise subtitle folders, reading controls, and preview dismissal with synthetic data
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -233,6 +238,54 @@ jobs:
           name: Artwork-Palette-Evidence
           path: source/build/ArtworkPaletteEvidence
           if-no-files-found: ignore
+
+  subtitle_ui:
+    if: ${{ inputs.run_subtitle_ui_tests }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.SOURCE_REPOSITORY }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify subtitle source and install tools
+        working-directory: source
+        run: |
+          git merge-base --is-ancestor HEAD origin/feature/subtitle-archive-import
+          xcodebuild -version
+          brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
+      - name: Subtitle UI regressions
+        working-directory: source
+        run: |
+          bash tools/test_work_menu_smoke.sh NeiroInteractionUITests/SubtitleLibraryTouchTests > "$RUNNER_TEMP/subtitle-ui-tests.log" 2>&1
+      - name: Export subtitle UI diagnostics and screenshots
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/subtitle-ui-tests.log" ]; then
+            grep -E "error:|fatal error:|Assertion|FAIL|Test Case .*failed|Executed|TEST SUCCEEDED" "$RUNNER_TEMP/subtitle-ui-tests.log" || true
+            cp "$RUNNER_TEMP/subtitle-ui-tests.log" source/build/SubtitleUI-tests.log
+          fi
+          result_bundle="source/build/WorkMenuSmoke.xcresult"
+          if [ -d "$result_bundle" ]; then
+            xcrun xcresulttool get test-results summary --path "$result_bundle" > source/build/SubtitleUI-summary.json
+            cat source/build/SubtitleUI-summary.json
+            xcrun xcresulttool export attachments --path "$result_bundle" --output-path source/build/SubtitleUIAttachments
+          fi
+      - name: Upload subtitle UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Subtitle-UI-Evidence
+          path: |
+            source/build/SubtitleUIAttachments
+            source/build/SubtitleUI-summary.json
+            source/build/SubtitleUI-tests.log
+          if-no-files-found: warn
 
   picker:
     if: ${{ inputs.run_picker_tests }}
