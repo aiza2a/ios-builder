@@ -4,192 +4,80 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Source revision
-        required: false
-        default: fix/ui-aesthetic-round2
+        description: Subtitle source branch or exact commit
+        required: true
+        default: feature/subtitle-archive-import
         type: string
-      run_tests:
-        description: Run targeted regression tests before compiling
-        required: false
-        default: false
-        type: boolean
-      run_interaction_tests:
-        description: Include touch interaction tests
-        required: false
-        default: false
-        type: boolean
-      regression_scope:
-        description: Select the requested regression test group
-        required: false
-        default: ui
-        type: choice
-        options:
-          - ui
-          - listening-player
       build_artifact:
-        description: Compile, package and publish an IPA
+        description: Build and publish the subtitle preview IPA
         required: false
         default: true
         type: boolean
-      run_work_menu_smoke:
-        description: Verify work-card taps and native context menus
+      run_tests:
+        description: Run native archive checks and XCTest independently
         required: false
-        default: false
+        default: true
         type: boolean
-      work_menu_test_filter:
-        description: XCTest identifier for the requested touch checks
-        required: false
-        default: NeiroInteractionUITests/WorkMenuTouchTests
-        type: string
 
 permissions:
   contents: read
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
 jobs:
   build:
+    if: ${{ inputs.build_artifact }}
     runs-on: macos-15
-    # All adopting branches share one release lane. Test-only runs remain independent.
+    timeout-minutes: 60
     concurrency:
-      group: ${{ inputs.build_artifact && 'successful-ipa-release' || format('tests-{0}', github.run_id) }}
+      group: subtitle-successful-ipa-release
       cancel-in-progress: false
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-
     steps:
       - name: Checkout builder
         uses: actions/checkout@v4
         with:
           path: builder
           persist-credentials: false
-
       - name: Checkout source
         uses: actions/checkout@v4
         with:
           repository: ${{ secrets.SOURCE_REPOSITORY }}
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          ref: ${{ inputs.source_ref || 'fix/ui-aesthetic-round2' }}
+          ref: ${{ inputs.source_ref }}
           path: source
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install build generator
-        run: brew install xcodegen > "$RUNNER_TEMP/generator.log" 2>&1
-
-      - name: Generate project
+      - name: Verify subtitle source and toolchain
         working-directory: source
-        run: xcodegen generate > "$RUNNER_TEMP/project.log" 2>&1
-
-      - name: Prepare release metadata
-        if: ${{ inputs.build_artifact }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/feature/subtitle-archive-import
+          xcodebuild -version
+          xcrun swift --version
+          brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
+          python3 -m unittest discover -s ../builder/tests
+          xcodegen generate > "$RUNNER_TEMP/project.log" 2>&1
+      - name: Prepare preview version
         working-directory: source
         env:
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
           DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
-          SOURCE_REF: ${{ inputs.source_ref || 'fix/ui-aesthetic-round2' }}
+          RELEASE_SERIES: S
         run: |
-          version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([^" ]+)"?.*$/\1/p' project.yml | head -n 1)"
-          test -n "$version"
+          version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([^" ]+)".*$/\1/p' project.yml | head -n 1)"
+          test "$version" = "0.8.5"
           export MARKETING_VERSION="$version"
           BUILD_NUMBER="$(python3 "$GITHUB_WORKSPACE/builder/tools/release_number.py" resolve)"
-          source_commit="$(git rev-parse HEAD)"
-          release_tag="v${version}-${BUILD_NUMBER}"
-          ipa_name="${APP_NAME}-${release_tag}.ipa"
-
           {
             echo "MARKETING_VERSION=$version"
             echo "BUILD_NUMBER=$BUILD_NUMBER"
-            echo "RELEASE_TAG=$release_tag"
-            echo "IPA_NAME=$ipa_name"
-            echo "SOURCE_COMMIT=$source_commit"
-            echo "SOURCE_REF=$SOURCE_REF"
+            echo "RELEASE_SERIES=S"
+            echo "RELEASE_TAG=v${version}-S${BUILD_NUMBER}"
+            echo "IPA_NAME=${APP_NAME}-v${version}-S${BUILD_NUMBER}.ipa"
+            echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
           } >> "$GITHUB_ENV"
-
-          if [ -s RELEASE_NOTES_ZH.md ]; then
-            cp RELEASE_NOTES_ZH.md "$RUNNER_TEMP/release-notes.md"
-          else
-            {
-              echo "## 本次修改"
-              echo "- 未提供 RELEASE_NOTES_ZH.md，以下内容根据源码提交自动整理。"
-              echo
-              echo "### 提交摘要"
-              last_tag="$(git tag --list 'v*-*' --sort=-version:refname | head -n 1)"
-              if [ -z "$last_tag" ]; then
-                last_tag="$(git tag --list 'build-*' --sort=-version:refname | head -n 1)"
-              fi
-              if [ -n "$last_tag" ] && git rev-parse "$last_tag" >/dev/null 2>&1; then
-                git log --no-merges --format='- %s (%h)' "$last_tag..HEAD"
-                echo
-                echo "### 变更文件"
-                git diff --stat "$last_tag..HEAD"
-              else
-                git log --no-merges -n 20 --format='- %s (%h)'
-                echo
-                echo "### 最近提交变更文件"
-                git show --stat --oneline --summary HEAD
-              fi
-            } > "$RUNNER_TEMP/release-notes.md"
-          fi
-          echo "metadata=verified"
-
-      - name: Verify Xcode 26 toolchain
-        run: |
-          xcodebuild -version
-          xcrun swift --version
-          test -d "$DEVELOPER_DIR"
-
-      - name: UI and sorting regressions
-        if: ${{ inputs.run_tests || inputs.run_interaction_tests }}
-        working-directory: source
-        env:
-          RUN_INTERACTION_TESTS: ${{ inputs.run_interaction_tests && '1' || '0' }}
-          REGRESSION_SCOPE: ${{ inputs.regression_scope || 'ui' }}
-        run: bash tools/test_ui_regressions.sh > "$RUNNER_TEMP/ui-tests.log" 2>&1
-
-      - name: Show regression diagnostics
-        if: ${{ always() && (inputs.run_tests || inputs.run_interaction_tests) }}
-        run: |
-          if [ -f "$RUNNER_TEMP/ui-tests.log" ]; then
-            grep -E "error:|failed|TEST FAILED" "$RUNNER_TEMP/ui-tests.log" || true
-            grep -E "Executed|TEST SUCCEEDED" "$RUNNER_TEMP/ui-tests.log" | tail -30 || true
-          fi
-
-      - name: Upload UI regression results
-        if: ${{ always() && (inputs.run_tests || inputs.run_interaction_tests) }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: UI-Regression-Results
-          path: |
-            source/build/UIRegression-*.xcresult
-            ${{ runner.temp }}/ui-tests.log
-          if-no-files-found: ignore
-
-      - name: Work menu touch smoke
-        if: ${{ inputs.run_work_menu_smoke }}
-        working-directory: source
-        env:
-          WORK_MENU_TEST_FILTER: ${{ inputs.work_menu_test_filter }}
-        run: bash tools/test_work_menu_smoke.sh "$WORK_MENU_TEST_FILTER" > "$RUNNER_TEMP/work-menu-smoke.log" 2>&1
-
-      - name: Show work menu diagnostics
-        if: ${{ always() && inputs.run_work_menu_smoke }}
-        run: |
-          if [ -f "$RUNNER_TEMP/work-menu-smoke.log" ]; then
-            grep -E "error:|failed|TEST FAILED|Executed|TEST SUCCEEDED" "$RUNNER_TEMP/work-menu-smoke.log" | tail -80 || true
-          fi
-
-      - name: Upload work menu results
-        if: ${{ always() && inputs.run_work_menu_smoke }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Work-Menu-Smoke
-          path: |
-            source/build/WorkMenuSmoke*.xcresult
-            ${{ runner.temp }}/work-menu-smoke.log
-          if-no-files-found: warn
-
       - name: Archive
-        if: ${{ inputs.build_artifact }}
         id: archive
         working-directory: source
         env:
@@ -197,76 +85,82 @@ jobs:
           SOURCE_SCHEME: ${{ secrets.SOURCE_SCHEME }}
         run: |
           xcodebuild archive \
-            -project "$SOURCE_PROJECT" \
-            -scheme "$SOURCE_SCHEME" \
-            -configuration Release \
-            -destination generic/platform=iOS \
+            -project "$SOURCE_PROJECT" -scheme "$SOURCE_SCHEME" \
+            -configuration Release -destination generic/platform=iOS \
             -archivePath build/App.xcarchive \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_ENTITLEMENTS="" \
-            EXPANDED_CODE_SIGN_IDENTITY="" \
-            > "$RUNNER_TEMP/archive.log" 2>&1
-
-      - name: Show archive diagnostics on failure
+            NEIRO_RELEASE_LABEL="${MARKETING_VERSION}-S${BUILD_NUMBER}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" > "$RUNNER_TEMP/archive.log" 2>&1
+      - name: Show archive diagnostics
         if: failure() && steps.archive.outcome == 'failure'
-        working-directory: source
         run: |
-          echo "archive=failed"
-          grep -E "error:|fatal error:|BUILD FAILED|SwiftCompile|CompileSwift" "$RUNNER_TEMP/archive.log" | tail -200 || true
-
+          grep -E "error:|fatal error:|BUILD FAILED|Error |CMake Error" "$RUNNER_TEMP/archive.log" | tail -160 || true
       - name: Package IPA
-        if: ${{ inputs.build_artifact }}
         working-directory: source
         run: |
-          rm -rf build/Payload
           mkdir -p build/Payload
           app_path="$(find build/App.xcarchive/Products/Applications -maxdepth 1 -type d -name '*.app' | head -n 1)"
           test -n "$app_path"
           cp -R "$app_path" build/Payload/
+          /usr/libexec/PlistBuddy -c "Print :NeiroReleaseLabel" "$app_path/Info.plist"
           (cd build && zip -qr "$IPA_NAME" Payload)
           test -s "build/$IPA_NAME"
-          echo "package=verified"
-
-      - name: Publish private artifact
-        if: ${{ inputs.build_artifact }}
+      - name: Publish private preview
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_WRITE_TOKEN }}
           DESTINATION_REPOSITORY: ${{ secrets.SOURCE_REPOSITORY }}
           APP_NAME: ${{ secrets.SOURCE_SCHEME }}
-          RUN_REGRESSION_TESTS: ${{ inputs.run_tests }}
-          RUN_WORK_MENU_SMOKE: ${{ inputs.run_work_menu_smoke }}
         run: |
           {
-            cat "$RUNNER_TEMP/release-notes.md"
+            echo "字幕导入预览版 ${MARKETING_VERSION}-S${BUILD_NUMBER}"
             echo
-            echo "## 构建信息"
-            echo "- 应用版本：$MARKETING_VERSION"
-            echo "- 构建编号：$BUILD_NUMBER"
+            echo "- ZIP、7z、RAR 本地字幕导入、RJ 作品关联与去重。"
+            echo "- 播放器选择本地字幕、查看正文和原文、调整字幕偏移。"
+            echo "- 构建与测试独立运行，本包发布仅代表 Archive 和 IPA 打包成功。"
             echo "- 源码提交：$SOURCE_COMMIT"
-            echo "- 源码版本：$SOURCE_REF"
-            echo
-            echo "## 验证结果"
-            echo "- 私有源码读取：通过"
-            echo "- Xcode 工程生成：通过"
-            echo "- Archive 编译：通过"
-            if [ "$RUN_REGRESSION_TESTS" = true ]; then
-              echo "- 专项测试：通过"
-            else
-              echo "- 专项测试：按本次选择未执行"
-            fi
-            echo "- IPA 打包：通过"
-            if [ "$RUN_WORK_MENU_SMOKE" = true ]; then
-              echo "- 作品点击与原生长按触摸检查：通过"
-            fi
-            echo "- 私有 Release 发布：通过"
-            echo
-            echo "## 产物"
-            echo "- $IPA_NAME"
+            echo "- 测试状态：https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- 无密码、非分卷字幕包；真实设备体验仍需验证。"
           } > "$RUNNER_TEMP/release-body.md"
-
           export IPA_PATH="$GITHUB_WORKSPACE/source/build/$IPA_NAME"
           export NOTES_PATH="$RUNNER_TEMP/release-body.md"
           python3 "$GITHUB_WORKSPACE/builder/tools/release_number.py" publish
+
+  test:
+    if: ${{ inputs.run_tests }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.SOURCE_REPOSITORY }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify subtitle source and install tools
+        working-directory: source
+        run: |
+          git merge-base --is-ancestor HEAD origin/feature/subtitle-archive-import
+          xcodebuild -version
+          brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
+      - name: Native archive regression
+        id: native
+        working-directory: source
+        run: bash tools/test_archive_native.sh > "$RUNNER_TEMP/native-tests.log" 2>&1
+      - name: XCTest
+        id: xctest
+        if: ${{ !cancelled() }}
+        working-directory: source
+        run: bash tools/test_ios.sh > "$RUNNER_TEMP/xctest.log" 2>&1
+      - name: Test diagnostics
+        if: always()
+        run: |
+          for log in "$RUNNER_TEMP/native-tests.log" "$RUNNER_TEMP/xctest.log"; do
+            if [ -f "$log" ]; then
+              grep -E "error:|fatal error:|CMake Error|Assertion|FAIL|PASS|Executed|TEST SUCCEEDED|failed|passed" "$log" | tail -180 || true
+            fi
+          done

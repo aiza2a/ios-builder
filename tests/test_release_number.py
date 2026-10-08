@@ -25,6 +25,13 @@ class ReleaseNumberTests(unittest.TestCase):
         items = [release("v0.8.3-53"), release("v0.8.3-57"), release("v0.8.2-99")]
         self.assertEqual(release_number.next_number(items, "0.8.3", "App"), 58)
 
+    def test_subtitle_series_does_not_share_stable_version_counter(self):
+        items = [release("v0.8.5-80"), release("v0.8.5-S2"), release("v0.8.5-S3", draft=True)]
+        self.assertEqual(release_number.next_number(items, "0.8.5", "App", "S"), 3)
+        self.assertEqual(release_number.next_number(items, "0.8.5", "App"), 81)
+        with self.assertRaises(ValueError):
+            release_number.next_number(items, "0.8.5", "App", "S\nBAD=1")
+
     def test_failed_drafts_and_incomplete_uploads_do_not_count(self):
         items = [release("v1.0.0-2"), release("v1.0.0-3", draft=True),
                  release("v1.0.0-4", size=0), release("v1.0.0-5", state="starter")]
@@ -53,9 +60,9 @@ class ReleaseNumberTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already exists"):
                 release_number.available_number("owner/repo", "1.0.0", "App")
 
-    def run_publish(self, responses, upload_error=None):
+    def run_publish(self, responses, upload_error=None, series=""):
         with tempfile.TemporaryDirectory() as directory:
-            artifact = Path(directory) / "App-v1.0.0-1.ipa"
+            artifact = Path(directory) / f"App-v1.0.0-{series}1.ipa"
             artifact.write_bytes(b"test archive")
             notes = Path(directory) / "notes.md"
             notes.write_text("Test", encoding="utf-8")
@@ -64,7 +71,7 @@ class ReleaseNumberTests(unittest.TestCase):
                  patch.object(release_number.subprocess, "run", side_effect=upload_error), \
                  patch.dict(os.environ, {"GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "2"}):
                 try:
-                    release_number.publish("owner/repo", "1.0.0", "App", 1, "a" * 40, artifact, notes)
+                    release_number.publish("owner/repo", "1.0.0", "App", 1, "a" * 40, artifact, notes, series)
                 finally:
                     self.api_calls = api.call_args_list
 
@@ -75,6 +82,14 @@ class ReleaseNumberTests(unittest.TestCase):
         self.assertEqual(created["tag_name"], "pending-build-100-2")
         published = self.api_calls[-1].args[3]
         self.assertEqual(published, {"tag_name": "v1.0.0-1", "target_commitish": "a" * 40, "draft": False})
+
+    def test_subtitle_build_is_a_prerelease_and_does_not_replace_latest(self):
+        self.run_publish([{"id": 123}, release("v1.0.0-S1", draft=True), release("v1.0.0-S1")], series="S")
+        published = self.api_calls[-1].args[3]
+        self.assertEqual(published["tag_name"], "v1.0.0-S1")
+        self.assertEqual(published["target_commitish"], "a" * 40)
+        self.assertTrue(published["prerelease"])
+        self.assertEqual(published["make_latest"], "false")
 
     def test_failed_upload_removes_only_its_draft_and_raises(self):
         with self.assertRaises(subprocess.CalledProcessError):

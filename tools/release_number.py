@@ -28,10 +28,12 @@ def releases(repo):
         page += 1
 
 
-def next_number(items, version, app_name):
+def next_number(items, version, app_name, series=""):
     if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", version):
         raise ValueError("MARKETING_VERSION must be a numeric application version")
-    pattern = re.compile(rf"v{re.escape(version)}-([1-9][0-9]*)")
+    if series and not re.fullmatch(r"[A-Z]", series):
+        raise ValueError("Release series must be one uppercase letter")
+    pattern = re.compile(rf"v{re.escape(version)}-{re.escape(series)}([1-9][0-9]*)")
     numbers = []
     for release in items:
         match = pattern.fullmatch(release["tag_name"])
@@ -44,10 +46,10 @@ def next_number(items, version, app_name):
     return max(numbers, default=0) + 1
 
 
-def available_number(repo, version, app_name):
+def available_number(repo, version, app_name, series=""):
     items = releases(repo)
-    number = next_number(items, version, app_name)
-    tag = f"v{version}-{number}"
+    number = next_number(items, version, app_name, series)
+    tag = f"v{version}-{series}{number}"
     # Never overwrite an old tag or a partial/manual release to reclaim a number.
     if any(item["tag_name"] == tag for item in items):
         raise RuntimeError(f"Release {tag} exists without a complete published IPA; inspect it first")
@@ -63,9 +65,9 @@ def complete_release(release, tag, asset_name, asset_size):
                     and asset["size"] == asset_size for asset in release["assets"]))
 
 
-def publish(repo, version, app_name, number, source_commit, artifact, notes):
-    tag = f"v{version}-{number}"
-    if available_number(repo, version, app_name) != number:
+def publish(repo, version, app_name, number, source_commit, artifact, notes, series=""):
+    tag = f"v{version}-{series}{number}"
+    if available_number(repo, version, app_name, series) != number:
         raise RuntimeError("Another publisher changed the version counter; rerun this build")
     artifact = Path(artifact)
     size = artifact.stat().st_size
@@ -90,6 +92,7 @@ def publish(repo, version, app_name, number, source_commit, artifact, notes):
             raise RuntimeError("Uploaded IPA failed verification")
         published = api(repo, endpoint, "PATCH", {
             "tag_name": tag, "target_commitish": source_commit, "draft": False,
+            **({"prerelease": True, "make_latest": "false"} if series else {}),
         })
         if not complete_release(published, tag, artifact.name, size):
             raise RuntimeError("Published release failed verification")
@@ -112,11 +115,12 @@ def main():
     repo = os.environ["DESTINATION_REPOSITORY"]
     version = os.environ["MARKETING_VERSION"]
     app_name = os.environ["APP_NAME"]
+    series = os.environ.get("RELEASE_SERIES", "")
     if args.action == "resolve":
-        print(available_number(repo, version, app_name))
+        print(available_number(repo, version, app_name, series))
     else:
         publish(repo, version, app_name, int(os.environ["BUILD_NUMBER"]),
-                os.environ["SOURCE_COMMIT"], os.environ["IPA_PATH"], os.environ["NOTES_PATH"])
+                os.environ["SOURCE_COMMIT"], os.environ["IPA_PATH"], os.environ["NOTES_PATH"], series)
 
 
 if __name__ == "__main__":
