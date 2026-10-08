@@ -175,7 +175,7 @@ jobs:
           case "$TEST_SCOPE" in
             full) ;;
             subtitle)
-              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests; do
+              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests ArtworkPaletteTests; do
                 filters+=("-only-testing:NeiroTests/$test_class")
               done
               ;;
@@ -195,6 +195,44 @@ jobs:
           if [ -n "$result_bundle" ]; then
             xcrun xcresulttool get test-results summary --path "$result_bundle" || true
           fi
+
+      - name: Export native artwork palette evidence
+        if: always()
+        working-directory: source
+        run: |
+          result_bundle="$(find build -maxdepth 1 -type d -name 'Tests-*.xcresult' | head -n 1)"
+          if [ -z "$result_bundle" ]; then
+            echo "No XCTest result bundle was produced."
+            exit 0
+          fi
+          xcrun xcresulttool export attachments --path "$result_bundle" --output-path build/XCTestAttachments
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import shutil
+
+          root = Path("build/XCTestAttachments")
+          output = Path("build/ArtworkPaletteEvidence")
+          selected = []
+          for test in json.loads((root / "manifest.json").read_text(encoding="utf-8")):
+              for attachment in test.get("attachments", []):
+                  name = attachment.get("suggestedHumanReadableName", "")
+                  if name.startswith("ArtworkPalette-") and name.endswith(".png"):
+                      output.mkdir(parents=True, exist_ok=True)
+                      shutil.copyfile(root / attachment["exportedFileName"], output / Path(name).name)
+                      selected.append(attachment)
+          if selected:
+              (output / "manifest.json").write_text(json.dumps(selected, indent=2), encoding="utf-8")
+          print(f"Exported {len(selected)} native artwork palette images.")
+          PY
+
+      - name: Upload native artwork palette evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Artwork-Palette-Evidence
+          path: source/build/ArtworkPaletteEvidence
+          if-no-files-found: ignore
 
   picker:
     if: ${{ inputs.run_picker_tests }}
