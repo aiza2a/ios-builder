@@ -26,6 +26,11 @@ on:
         options:
           - full
           - subtitle
+      run_picker_tests:
+        description: Touch the real iOS Files picker with synthetic local archives
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -190,3 +195,55 @@ jobs:
           if [ -n "$result_bundle" ]; then
             xcrun xcresulttool get test-results summary --path "$result_bundle" || true
           fi
+
+  picker:
+    if: ${{ inputs.run_picker_tests }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.SOURCE_REPOSITORY }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify subtitle source and install tools
+        working-directory: source
+        run: |
+          git merge-base --is-ancestor HEAD origin/feature/subtitle-archive-import
+          xcodebuild -version
+          brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
+      - name: Real Files picker touch regression
+        id: picker
+        working-directory: source
+        run: bash tools/test_subtitle_picker.sh > "$RUNNER_TEMP/picker-tests.log" 2>&1
+      - name: Picker diagnostics and synthetic screenshots
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/picker-tests.log" ]; then
+            grep -E "error:|fatal error:|CMake Error|Assertion|FAIL|Test Case .*failed|SUBTITLE_PICKER|picker_fixture|Executed|TEST SUCCEEDED" "$RUNNER_TEMP/picker-tests.log" || true
+            tail -50 "$RUNNER_TEMP/picker-tests.log"
+          fi
+          if [ -d source/build/WorkMenuSmoke.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path source/build/WorkMenuSmoke.xcresult || true
+            if [ ! -d source/build/SubtitlePickerAttachments ]; then
+              xcrun xcresulttool export attachments --path source/build/WorkMenuSmoke.xcresult --output-path source/build/SubtitlePickerAttachments || true
+            fi
+          fi
+      - name: Upload synthetic picker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Subtitle-Picker-Evidence
+          path: |
+            source/build/SubtitlePickerAttachments
+            source/build/SubtitlePicker-last-screen.png
+            source/build/SubtitlePicker-summary.json
+            source/build/SubtitlePicker-fixture.json
+            source/build/SubtitlePicker-files-launch.log
+            source/build/SubtitlePicker-group-direct.log
+            source/build/SubtitlePicker-group-metadata.json
+          if-no-files-found: ignore
