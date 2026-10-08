@@ -182,6 +182,11 @@ jobs:
         run: |
           for log in "$RUNNER_TEMP/native-tests.log" "$RUNNER_TEMP/xctest.log"; do
             if [ -f "$log" ]; then
-              grep -E "error:|fatal error:|CMake Error|Assertion|FAIL|PASS|Executed|TEST SUCCEEDED|failed|passed" "$log" | tail -180 || true
+              grep -E "error:|fatal error:|CMake Error|Assertion|FAIL|Test Case .*failed" "$log" || true
+              grep -E "PASS|Executed|TEST SUCCEEDED|Test Suite .*failed|passed;.*failed" "$log" | tail -90 || true
             fi
           done
+          result_bundle="$(find source/build -maxdepth 1 -type d -name 'Tests-*.xcresult' | head -n 1)"
+          if [ -n "$result_bundle" ]; then
+            xcrun xcresulttool get test-results summary --path "$result_bundle" || true
+          fi
