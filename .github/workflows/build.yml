@@ -19,13 +19,14 @@ on:
         default: true
         type: boolean
       test_scope:
-        description: Full suite or subtitle and playback regressions
+        description: Full suite, subtitle playback, or focused subtitle store regressions
         required: false
         default: full
         type: choice
         options:
           - full
           - subtitle
+          - subtitle_store
       run_picker_tests:
         description: Touch the real iOS Files picker with synthetic local archives
         required: false
@@ -167,6 +168,7 @@ jobs:
           brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
       - name: Native archive regression
         id: native
+        if: ${{ inputs.test_scope != 'subtitle_store' }}
         working-directory: source
         run: bash tools/test_archive_native.sh > "$RUNNER_TEMP/native-tests.log" 2>&1
       - name: XCTest
@@ -183,6 +185,9 @@ jobs:
               for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests ArtworkPaletteTests; do
                 filters+=("-only-testing:NeiroTests/$test_class")
               done
+              ;;
+            subtitle_store)
+              filters+=("-only-testing:NeiroTests/SubtitleLibraryStoreTests")
               ;;
             *) echo "Unknown test scope" >&2; exit 2 ;;
           esac
