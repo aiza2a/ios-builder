@@ -38,6 +38,11 @@ on:
         required: false
         default: false
         type: boolean
+      subtitle_ui_filter:
+        description: SubtitleLibraryTouchTests class or one method within that class
+        required: false
+        default: NeiroInteractionUITests/SubtitleLibraryTouchTests
+        type: string
 
 permissions:
   contents: read
@@ -298,8 +303,14 @@ jobs:
           PY
       - name: Subtitle UI regressions
         working-directory: source
+        env:
+          SUBTITLE_UI_FILTER: ${{ inputs.subtitle_ui_filter }}
         run: |
-          bash tools/test_work_menu_smoke.sh NeiroInteractionUITests/SubtitleLibraryTouchTests > "$RUNNER_TEMP/subtitle-ui-tests.log" 2>&1
+          if [[ ! "$SUBTITLE_UI_FILTER" =~ ^NeiroInteractionUITests/SubtitleLibraryTouchTests(/test[A-Za-z0-9_]+)?$ ]]; then
+            echo "Invalid subtitle UI filter: expected SubtitleLibraryTouchTests or one of its test methods." >&2
+            exit 2
+          fi
+          bash tools/test_work_menu_smoke.sh "$SUBTITLE_UI_FILTER" > "$RUNNER_TEMP/subtitle-ui-tests.log" 2>&1
       - name: Export subtitle UI diagnostics and screenshots
         if: always()
         run: |
