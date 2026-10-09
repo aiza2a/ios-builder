@@ -189,7 +189,7 @@ jobs:
           case "$TEST_SCOPE" in
             full) ;;
             subtitle)
-              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleImportNoticeTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests ArtworkPaletteTests ListeningStatisticsRuntimeFixTests; do
+              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleImportNoticeTests SubtitleWorkLookupTests SubtitleWorkManagementTests SubtitleMatchingTests SubtitleParserTests LyricsStoreTests TrackSelectionPolicyTests LyricsPresentationTests StorageAccountingTests StorageViewLogicTests TemporaryStorageCleanerTests ArtworkPaletteTests ListeningStatisticsRuntimeFixTests; do
                 filters+=("-only-testing:NeiroTests/$test_class")
               done
               ;;
@@ -204,7 +204,7 @@ jobs:
               filters+=("-only-testing:NeiroTests/ListeningStatisticsRuntimeFixTests/testDeleteHitDecisionPureFunction")
               ;;
             subtitle_import)
-              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleImportNoticeTests SubtitleParserTests; do
+              for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleImportNoticeTests SubtitleWorkLookupTests SubtitleWorkManagementTests SubtitleParserTests; do
                 filters+=("-only-testing:NeiroTests/$test_class")
               done
               ;;
