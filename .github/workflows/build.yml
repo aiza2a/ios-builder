@@ -29,6 +29,7 @@ on:
           - subtitle_store
           - subtitle_browse
           - subtitle_import
+          - subtitle_lookup
       run_picker_tests:
         description: Touch the real iOS Files picker with synthetic local archives
         required: false
@@ -206,6 +207,14 @@ jobs:
             subtitle_import)
               for test_class in SubtitleArchiveReaderTests SubtitleLibraryStoreTests SubtitleLibraryBrowseTests SubtitleImportNoticeTests SubtitleWorkLookupTests SubtitleWorkManagementTests APIClientRoutingTests SubtitleParserTests; do
                 filters+=("-only-testing:NeiroTests/$test_class")
+              done
+              ;;
+            subtitle_lookup)
+              for test_class in APIClientRoutingTests SubtitleWorkLookupTests; do
+                filters+=("-only-testing:NeiroTests/$test_class")
+              done
+              for test_method in testImportCoordinatorContinuesAfterPresentingTaskIsCancelled testImportCoordinatorCancellationBeforeCommitLeavesLibraryUnchanged testImportCoordinatorCancellationDuringLookupPreservesImportAndAllowsNextTask; do
+                filters+=("-only-testing:NeiroTests/SubtitleLibraryStoreTests/$test_method")
               done
               ;;
             *) echo "Unknown test scope" >&2; exit 2 ;;
