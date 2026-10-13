@@ -29,7 +29,7 @@ def releases(repo):
 
 
 def next_number(items, version, app_name):
-    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", version):
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}(?:-[A-Za-z0-9.]+)?", version):
         raise ValueError("MARKETING_VERSION must be a numeric application version")
     pattern = re.compile(rf"v{re.escape(version)}-([1-9][0-9]*)")
     numbers = []
