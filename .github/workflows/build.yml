@@ -26,6 +26,7 @@ on:
         options:
           - ui
           - listening-player
+          - full
       build_artifact:
         description: Compile, package and publish an IPA
         required: false
@@ -73,7 +74,7 @@ jobs:
           persist-credentials: false
 
       - name: Install build generator
-        run: brew install xcodegen > "$RUNNER_TEMP/generator.log" 2>&1
+        run: brew install xcodegen cmake > "$RUNNER_TEMP/generator.log" 2>&1
 
       - name: Generate project
         working-directory: source
